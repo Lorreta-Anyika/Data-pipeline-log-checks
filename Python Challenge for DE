@@ -1,0 +1,794 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/Lorreta-Anyika/Data-pipeline-log-checks/blob/main/Python%20Challenge%20for%20DE\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "G1kJglly0-LO"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "# MONITORING SYSTEM DATA PIPELINE"
+      ],
+      "metadata": {
+        "id": "OkipwFAe0--8"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "\"\"\"\n",
+        "Scenario:\n",
+        "\n",
+        "You're building a monitoring system for a data pipeline in a data lakehouse architecture.\n",
+        "Your job is to analyze the metadata logs from multiple data sources and determine the\n",
+        "health status of each pipeline run.\n",
+        "\n",
+        "Each pipeline run is logged in a JSON-like format that will be provided below.\n",
+        "\n",
+        "You are given a list of such logs for different pipelines. Your task is to analyze each log and apply the\n",
+        "following complex conditional rules to determine the pipeline health status:\n",
+        "\n",
+        "✅ Evaluation Rules:\n",
+        "\n",
+        "Assign a health_status field with one of the following values:\n",
+        "\n",
+        "    - \"HEALTHY\"\n",
+        "    - \"WARNING\"\n",
+        "    - \"CRITICAL\"\n",
+        "\n",
+        "Based on the following logic:\n",
+        "\n",
+        "1. HEALTHY if:\n",
+        "\n",
+        "    - status_code is 200 AND\n",
+        "    - errors is empty AND\n",
+        "    - warnings is empty or only includes \"late data arrival\" AND\n",
+        "    - duration_seconds is less than 600 AND\n",
+        "    - max_latency_seconds is less than 10\n",
+        "\n",
+        "2. WARNING if any of the following:\n",
+        "\n",
+        "    - status_code is 200 AND\n",
+        "        - duration_seconds is between 600 and 1200 OR\n",
+        "        - max_latency_seconds is between 10 and 30 OR\n",
+        "        - warnings contains non-late data warning messages\n",
+        "    - OR there are fewer than 100 records ingested (record_count < 100) but no errors\n",
+        "\n",
+        "3. CRITICAL if:\n",
+        "\n",
+        "    - status_code is not 200\n",
+        "    - OR there are one or more errors\n",
+        "    - OR duration_seconds > 1200\n",
+        "    - OR max_latency_seconds > 30\n",
+        "    - OR record_count == 0\n",
+        "\n",
+        "🎯 Your Task:\n",
+        "\n",
+        "1. Write a function evaluate_pipeline_health(log) that takes a single log dictionary and returns the same dictionary with a new key health_status assigned based on the above rules.\n",
+        "\n",
+        "2. Write a function evaluate_all_pipelines(logs: List[Dict]) -> List[Dict] to apply this to a list of logs.\n",
+        "\n",
+        "3. Print a summary:\n",
+        "\n",
+        "    - Total pipelines evaluated\n",
+        "\n",
+        "    - Count of each health status category\n",
+        "\n",
+        "🧪 Bonus Challenge (optional):\n",
+        "\n",
+        "    - Add a rule: if the ingestion time is between midnight and 4 AM UTC, and the pipeline is \"CRITICAL\",\n",
+        "    mark it for \"High Priority Alert\".\n",
+        "\"\"\""
+      ],
+      "metadata": {
+        "id": "m0XrtrMz0_ev"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from google.colab import drive\n",
+        "drive.mount('/content/drive')"
+      ],
+      "metadata": {
+        "id": "QNZw4JUrP0Qm"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "\n",
+        "# Example logs for testing\n",
+        "pipeline_log = {\n",
+        "        \"pipeline_name\": \"user_events_ingestion\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 452,\n",
+        "        \"record_count\": 124500,\n",
+        "        \"max_latency_seconds\": 5.6,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [\"late data arrival\"],\n",
+        "        \"ingestion_time\": \"2025-10-08T02:30:00Z\",\n",
+        "        \"source\": \"kafka\"\n",
+        "    }\n",
+        "\n",
+        "# Example list of logs like above\n",
+        "logs = [\n",
+        "    {\n",
+        "        \"pipeline_name\": \"user_events_ingestion\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 452,\n",
+        "        \"record_count\": 124500,\n",
+        "        \"max_latency_seconds\": 5.6,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [\"late data arrival\"],\n",
+        "        \"ingestion_time\": \"2025-10-08T02:30:00Z\",\n",
+        "        \"source\": \"kafka\"\n",
+        "    },\n",
+        "    {\n",
+        "        \"pipeline_name\": \"transaction_data_load\",\n",
+        "        \"status_code\": 500,\n",
+        "        \"duration_seconds\": 1300,\n",
+        "        \"record_count\": 0,\n",
+        "        \"max_latency_seconds\": 45.2,\n",
+        "        \"errors\": [\"Database connection timeout\"],\n",
+        "        \"warnings\": [],\n",
+        "        \"ingestion_time\": \"2025-10-08T14:15:00Z\",\n",
+        "        \"source\": \"s3\"\n",
+        "    },\n",
+        "    {\n",
+        "        \"pipeline_name\": \"product_catalog_sync\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 800,\n",
+        "        \"record_count\": 80,\n",
+        "        \"max_latency_seconds\": 15.0,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [\"schema mismatch\"],\n",
+        "        \"ingestion_time\": \"2025-10-08T09:00:00Z\",\n",
+        "        \"source\": \"api\"\n",
+        "    },\n",
+        "    {\n",
+        "        \"pipeline_name\": \"inventory_update\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 300,\n",
+        "        \"record_count\": 1500,\n",
+        "        \"max_latency_seconds\": 8.0,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [],\n",
+        "        \"ingestion_time\": \"2025-10-08T03:45:00Z\",\n",
+        "        \"source\": \"ftp\"\n",
+        "    }\n",
+        "]"
+      ],
+      "metadata": {
+        "id": "x26Dvu-h08mu"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "# Question 1\n",
+        "## For the single log\n",
+        "### Using if/else statements"
+      ],
+      "metadata": {
+        "id": "AT-U3OLtga7j"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# 1. healthy Warning\n",
+        "\n",
+        "def evaluate_pipeline_health(log):\n",
+        "  if (log['status_code'] == 200\\\n",
+        "  and log['errors'] == []\\\n",
+        "  and (log['warnings'] == [] or ['late data arrival']) in log['warnings']\\\n",
+        "  and  log['duration_seconds'] < 600\\\n",
+        "  and log['max_latency_seconds'] < 10):\n",
+        "    log.update({'health_status': 'HEALTHY'})\n",
+        "    # update is for dictionaries as append is for list\n",
+        "\n",
+        "    # 2. WARNING\n",
+        "    ''' 2. WARNING\n",
+        "     if any of the following:\n",
+        "\n",
+        "status_code is 200 AND\n",
+        "duration_seconds is between 600 and 1200 OR\n",
+        "max_latency_seconds is between 10 and 30 OR\n",
+        "warnings contains non-late data warning messages\n",
+        "OR there are fewer than 100 records ingested (record_count < 100) but no errors'''\n",
+        "\n",
+        "  elif (log['status_code'] == 200\\\n",
+        "  and (log['duration_seconds'] > 600 and log['duration_seconds'] < 1200)\\\n",
+        "  or (log['max_latency_seconds'] > 10 and log['max_latency_seconds'] < 30)\\\n",
+        "  or 'late data arrival' in log['warnings']\\\n",
+        "  or (log['record_count'] < 100 and log['errors'] == [])\n",
+        "  ):\n",
+        "    log.update({'health_status': 'Warning'})\n",
+        "\n",
+        "    '''3. CRITICAL\n",
+        "    if:\n",
+        "\n",
+        "status_code is not 200\n",
+        "OR there are one or more errors\n",
+        "OR duration_seconds > 1200\n",
+        "OR max_latency_seconds > 30\n",
+        "OR record_count == 0'''\n",
+        "\n",
+        "  elif (log['status_code'] != 200\\\n",
+        "   or log['errors'] != []\\\n",
+        "   or log['duration_seconds'] > 1200\\\n",
+        "   or log['max_latency_seconds'] > 30\\\n",
+        "   or log['record_count'] == 0 ):\n",
+        "   log.update({'health_status': 'Critical'})\n",
+        "  else:\n",
+        "   log.update({'health_status': 'Unknown'})\n",
+        "\n",
+        "  return log"
+      ],
+      "metadata": {
+        "id": "Zzd7YuIzhdlM"
+      },
+      "execution_count": 20,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Example logs for testing\n",
+        "pipeline_log = {\n",
+        "        \"pipeline_name\": \"user_events_ingestion\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 452,\n",
+        "        \"record_count\": 124500,\n",
+        "        \"max_latency_seconds\": 5.6,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [\"late data arrival\"],\n",
+        "        \"ingestion_time\": \"2025-10-08T02:30:00Z\",\n",
+        "        \"source\": \"kafka\"\n",
+        "    }\n"
+      ],
+      "metadata": {
+        "id": "azJTVMEkvHRR"
+      },
+      "execution_count": 21,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "5I_A3lP019Fc"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "evaluate_pipeline_health(pipeline_log)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "HfznKZBSxh-p",
+        "outputId": "0fff1642-efcd-41dd-b3b8-0de7cab9c686"
+      },
+      "execution_count": 22,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "{'pipeline_name': 'user_events_ingestion',\n",
+              " 'status_code': 200,\n",
+              " 'duration_seconds': 452,\n",
+              " 'record_count': 124500,\n",
+              " 'max_latency_seconds': 5.6,\n",
+              " 'errors': [],\n",
+              " 'warnings': ['late data arrival'],\n",
+              " 'ingestion_time': '2025-10-08T02:30:00Z',\n",
+              " 'source': 'kafka',\n",
+              " 'health_status': 'Warning'}"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 22
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "# Question 2\n",
+        "###  For the list of dictionaries\n",
+        "## Using for loops and if statements"
+      ],
+      "metadata": {
+        "id": "Sz934jNo1-2P"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# First i will create an empty list. After each dictionary in the list is examined, it will be appended into this list. This will be the final standing list.\n",
+        "Checked_log_list = []\n",
+        "\n",
+        "#Next i am using a for loop. i want it to check each single log dictionary in the list one after the other\n",
+        "def evaluate_all_pipelines(logs):\n",
+        "  for each_log_dictionary in logs:\n",
+        "    if (\n",
+        "    each_log_dictionary['status_code'] == 200\\\n",
+        "    and  each_log_dictionary['errors'] == []\\\n",
+        "    and (each_log_dictionary['warnings'] == [] or ['late data arrival']) in each_log_dictionary['warnings']\\\n",
+        "    and  each_log_dictionary['duration_seconds'] < 600\\\n",
+        "    and each_log_dictionary['max_latency_seconds'] < 10\n",
+        "    ):\n",
+        "      each_log_dictionary.update({'health_status': 'HEALTHY'})\n",
+        "      Checked_log_list.append(each_log_dictionary)\n",
+        "\n",
+        "\n",
+        "      # 2. WARNING\n",
+        "    elif (\n",
+        "     each_log_dictionary['status_code'] == 200\\\n",
+        "    and (each_log_dictionary['duration_seconds'] > 600 and each_log_dictionary['duration_seconds'] < 1200)\\\n",
+        "    or ( each_log_dictionary['max_latency_seconds'] > 10 and  each_log_dictionary['max_latency_seconds'] < 30)\\\n",
+        "    or 'late data arrival' in  each_log_dictionary['warnings']\\\n",
+        "    or (each_log_dictionary['record_count'] < 100 and  each_log_dictionary['errors'] == [])\n",
+        "    ):\n",
+        "      each_log_dictionary.update({'health_status': 'Warning'})\n",
+        "      Checked_log_list.append(each_log_dictionary)\n",
+        "\n",
+        "    # 3. CRITICAL\n",
+        "\n",
+        "    elif (each_log_dictionary['status_code'] != 200\\\n",
+        "    or each_log_dictionary['errors'] != []\\\n",
+        "    or each_log_dictionary['duration_seconds'] > 1200\\\n",
+        "    or each_log_dictionary['max_latency_seconds'] > 30\\\n",
+        "    or each_log_dictionary['record_count'] == 0 ):\n",
+        "      each_log_dictionary.update({'health_status': 'Critical'})\n",
+        "      Checked_log_list.append(each_log_dictionary)\n",
+        "\n",
+        "    else:\n",
+        "      each_log_dictionary.update({'health_status': 'Unknown'})\n",
+        "\n",
+        "  return  Checked_log_list\n",
+        "\n"
+      ],
+      "metadata": {
+        "id": "9Owr8L9C1_Md"
+      },
+      "execution_count": 38,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Example list of logs like above\n",
+        "logs = [\n",
+        "    {\n",
+        "        \"pipeline_name\": \"user_events_ingestion\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 452,\n",
+        "        \"record_count\": 124500,\n",
+        "        \"max_latency_seconds\": 5.6,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [\"late data arrival\"],\n",
+        "        \"ingestion_time\": \"2025-10-08T02:30:00Z\",\n",
+        "        \"source\": \"kafka\"\n",
+        "    },\n",
+        "    {\n",
+        "        \"pipeline_name\": \"transaction_data_load\",\n",
+        "        \"status_code\": 500,\n",
+        "        \"duration_seconds\": 1300,\n",
+        "        \"record_count\": 0,\n",
+        "        \"max_latency_seconds\": 45.2,\n",
+        "        \"errors\": [\"Database connection timeout\"],\n",
+        "        \"warnings\": [],\n",
+        "        \"ingestion_time\": \"2025-10-08T14:15:00Z\",\n",
+        "        \"source\": \"s3\"\n",
+        "    },\n",
+        "    {\n",
+        "        \"pipeline_name\": \"product_catalog_sync\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 800,\n",
+        "        \"record_count\": 80,\n",
+        "        \"max_latency_seconds\": 15.0,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [\"schema mismatch\"],\n",
+        "        \"ingestion_time\": \"2025-10-08T09:00:00Z\",\n",
+        "        \"source\": \"api\"\n",
+        "    },\n",
+        "    {\n",
+        "        \"pipeline_name\": \"inventory_update\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 300,\n",
+        "        \"record_count\": 1500,\n",
+        "        \"max_latency_seconds\": 8.0,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [],\n",
+        "        \"ingestion_time\": \"2025-10-08T03:45:00Z\",\n",
+        "        \"source\": \"ftp\"\n",
+        "    }\n",
+        "]"
+      ],
+      "metadata": {
+        "id": "fAAjvQ2SAh85"
+      },
+      "execution_count": 39,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "evaluate_all_pipelines(logs)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "UMFXZczP_vFS",
+        "outputId": "149bbfc7-4736-4899-96d6-cd5261e0c23e"
+      },
+      "execution_count": 40,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "[{'pipeline_name': 'user_events_ingestion',\n",
+              "  'status_code': 200,\n",
+              "  'duration_seconds': 452,\n",
+              "  'record_count': 124500,\n",
+              "  'max_latency_seconds': 5.6,\n",
+              "  'errors': [],\n",
+              "  'warnings': ['late data arrival'],\n",
+              "  'ingestion_time': '2025-10-08T02:30:00Z',\n",
+              "  'source': 'kafka',\n",
+              "  'health_status': 'Warning'},\n",
+              " {'pipeline_name': 'transaction_data_load',\n",
+              "  'status_code': 500,\n",
+              "  'duration_seconds': 1300,\n",
+              "  'record_count': 0,\n",
+              "  'max_latency_seconds': 45.2,\n",
+              "  'errors': ['Database connection timeout'],\n",
+              "  'warnings': [],\n",
+              "  'ingestion_time': '2025-10-08T14:15:00Z',\n",
+              "  'source': 's3',\n",
+              "  'health_status': 'Critical'},\n",
+              " {'pipeline_name': 'product_catalog_sync',\n",
+              "  'status_code': 200,\n",
+              "  'duration_seconds': 800,\n",
+              "  'record_count': 80,\n",
+              "  'max_latency_seconds': 15.0,\n",
+              "  'errors': [],\n",
+              "  'warnings': ['schema mismatch'],\n",
+              "  'ingestion_time': '2025-10-08T09:00:00Z',\n",
+              "  'source': 'api',\n",
+              "  'health_status': 'Warning'}]"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 40
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "# 3. Print a summary:\n",
+        "\n",
+        "    - Total pipelines evaluated\n",
+        "\n",
+        "    - Count of each health status category"
+      ],
+      "metadata": {
+        "id": "ARyM1qJ41Pto"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Total pipelines eveluated\n",
+        "print (f'Total pipelines evaluated: {len(Checked_log_list)}')"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "GyUQzc3FxmwJ",
+        "outputId": "1d72cc76-c2af-416a-a42c-b8618c54b9b7"
+      },
+      "execution_count": 42,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Total pipelines evaluated: 3\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# count of each health status category\n",
+        "from collections import Counter\n",
+        "count_of_each_health_status = Counter(log['health_status'] for log in Checked_log_list)\n",
+        "for status, count in count_of_each_health_status.items():\n",
+        "  print(f'{status}: {count}')"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "zjOyt236DE1R",
+        "outputId": "e64c40b8-4a90-4f41-8ae7-7638e5fa44df"
+      },
+      "execution_count": 44,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Warning: 2\n",
+            "Critical: 1\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        " # Bonus Challenge (optional):\n",
+        "\n",
+        "- Add a rule: if the ingestion time is between midnight and 4 AM UTC, and the pipeline is \"CRITICAL\",\n",
+        "mark it for \"High Priority Alert\"."
+      ],
+      "metadata": {
+        "id": "e-KKc0SODn0A"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# import the datetime and time dictionary\n",
+        "from datetime import datetime, time\n",
+        "Checked_log_list = []\n",
+        "\n",
+        "#Next i am using a for loop. i want it to check each single log dictionary in the list one after the other\n",
+        "def evaluate_all_pipelines(logs):\n",
+        " # First i will create an empty list. After each dictionary in the list is examined, it will be appended into this list. This will be the final standing list\n",
+        "  for each_log_dictionary in logs:\n",
+        "    # Convert ingestion_time string to datetime format\n",
+        "    ingestion_time_str = each_log_dictionary['ingestion_time']\n",
+        "    ingestion_time = datetime.strptime(each_log_dictionary['ingestion_time'], \"%Y-%m-%dT%H:%M:%SZ\").time()\n",
+        "# the rest of the code from question 2 above stands. only the critical warning section is tweaked a bit\n",
+        "\n",
+        "    if (\n",
+        "    each_log_dictionary['status_code'] == 200\\\n",
+        "    and  each_log_dictionary['errors'] == []\\\n",
+        "    and (each_log_dictionary['warnings'] == [] or ['late data arrival']) in each_log_dictionary['warnings']\\\n",
+        "    and  each_log_dictionary['duration_seconds'] < 600\\\n",
+        "    and each_log_dictionary['max_latency_seconds'] < 10\n",
+        "    ):\n",
+        "      each_log_dictionary.update({'health_status': 'HEALTHY'})\n",
+        "      Checked_log_list.append(each_log_dictionary)\n",
+        "\n",
+        "\n",
+        "      # 2. WARNING\n",
+        "    elif (\n",
+        "     each_log_dictionary['status_code'] == 200\\\n",
+        "    and (each_log_dictionary['duration_seconds'] > 600 and each_log_dictionary['duration_seconds'] < 1200)\\\n",
+        "    or ( each_log_dictionary['max_latency_seconds'] > 10 and  each_log_dictionary['max_latency_seconds'] < 30)\\\n",
+        "    or 'late data arrival' in  each_log_dictionary['warnings']\\\n",
+        "    or (each_log_dictionary['record_count'] < 100 and  each_log_dictionary['errors'] == [])\n",
+        "    ):\n",
+        "      each_log_dictionary.update({'health_status': 'Warning'})\n",
+        "      Checked_log_list.append(each_log_dictionary)\n",
+        "\n",
+        "    # 3. CRITICAL\n",
+        "    # i will add the condition for high priority here too\n",
+        "\n",
+        "    elif (each_log_dictionary['status_code'] != 200\\\n",
+        "    or each_log_dictionary['errors'] != []\\\n",
+        "    or each_log_dictionary['duration_seconds'] > 1200\\\n",
+        "    or each_log_dictionary['max_latency_seconds'] > 30\\\n",
+        "    or each_log_dictionary['record_count'] == 0 ):\n",
+        "      each_log_dictionary.update({'health_status': 'Critical'})\n",
+        "\n",
+        "      if time(0, 0, 0) <= ingestion_time < time(4, 0, 0):\n",
+        "            each_log_dictionary.update({'health_status': 'High Priority Alert'})\n",
+        "\n",
+        "      Checked_log_list.append(each_log_dictionary)\n",
+        "\n",
+        "    else:\n",
+        "      each_log_dictionary.update({'health_status': 'Unknown'})\n",
+        "\n",
+        "  return  Checked_log_list\n",
+        "\n"
+      ],
+      "metadata": {
+        "id": "ijRH2vSWEqR5"
+      },
+      "execution_count": 75,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "logs = [\n",
+        "    # 1️⃣ HEALTHY — fast, no errors, within threshold\n",
+        "    {\n",
+        "        \"pipeline_name\": \"user_events_ingestion\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 452,\n",
+        "        \"record_count\": 124500,\n",
+        "        \"max_latency_seconds\": 5.6,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [],\n",
+        "        \"ingestion_time\": \"2025-10-26T08:30:00Z\",\n",
+        "        \"source\": \"kafka\"\n",
+        "    },\n",
+        "\n",
+        "    # 2️⃣ WARNING — duration slightly high, some late data\n",
+        "    {\n",
+        "        \"pipeline_name\": \"transactions_ingestion\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 800,\n",
+        "        \"record_count\": 80,\n",
+        "        \"max_latency_seconds\": 12,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [\"late data arrival\"],\n",
+        "        \"ingestion_time\": \"2025-10-26T11:15:00Z\",\n",
+        "        \"source\": \"kinesis\"\n",
+        "    },\n",
+        "\n",
+        "    # 3️⃣ CRITICAL — has errors and duration too long\n",
+        "    {\n",
+        "        \"pipeline_name\": \"payments_processing\",\n",
+        "        \"status_code\": 500,\n",
+        "        \"duration_seconds\": 1300,\n",
+        "        \"record_count\": 0,\n",
+        "        \"max_latency_seconds\": 45,\n",
+        "        \"errors\": [\"timeout\", \"connection reset\"],\n",
+        "        \"warnings\": [],\n",
+        "        \"ingestion_time\": \"2025-10-26T09:00:00Z\",\n",
+        "        \"source\": \"kafka\"\n",
+        "    },\n",
+        "\n",
+        "    # 4️⃣ HIGH PRIORITY ALERT — ingested between midnight and 4 AM\n",
+        "    {\n",
+        "        \"pipeline_name\": \"audit_logs_ingestion\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 700,\n",
+        "        \"record_count\": 90000,\n",
+        "        \"max_latency_seconds\": 15,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [\"late data arrival\"],\n",
+        "        \"ingestion_time\": \"2025-10-26T02:15:00Z\",\n",
+        "        \"source\": \"s3\"\n",
+        "    },\n",
+        "\n",
+        "    # 5️⃣ UNKNOWN — doesn’t meet any defined category clearly\n",
+        "    {\n",
+        "        \"pipeline_name\": \"metadata_collector\",\n",
+        "        \"status_code\": 200,\n",
+        "        \"duration_seconds\": 100,\n",
+        "        \"record_count\": 200,\n",
+        "        \"max_latency_seconds\": 5,\n",
+        "        \"errors\": [],\n",
+        "        \"warnings\": [\"nonstandard alert\"],\n",
+        "        \"ingestion_time\": \"2025-10-26T10:45:00Z\",\n",
+        "        \"source\": \"api\"\n",
+        "    }\n",
+        "]\n"
+      ],
+      "metadata": {
+        "id": "K-x8yjq3Fdri"
+      },
+      "execution_count": 76,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "evaluate_all_pipelines(logs)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "KhyOTeylHSwu",
+        "outputId": "2451af1b-0bcb-4014-d15d-777041a2d17d"
+      },
+      "execution_count": 77,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "[{'pipeline_name': 'transactions_ingestion',\n",
+              "  'status_code': 200,\n",
+              "  'duration_seconds': 800,\n",
+              "  'record_count': 80,\n",
+              "  'max_latency_seconds': 12,\n",
+              "  'errors': [],\n",
+              "  'warnings': ['late data arrival'],\n",
+              "  'ingestion_time': '2025-10-26T11:15:00Z',\n",
+              "  'source': 'kinesis',\n",
+              "  'health_status': 'Warning'},\n",
+              " {'pipeline_name': 'payments_processing',\n",
+              "  'status_code': 500,\n",
+              "  'duration_seconds': 1300,\n",
+              "  'record_count': 0,\n",
+              "  'max_latency_seconds': 45,\n",
+              "  'errors': ['timeout', 'connection reset'],\n",
+              "  'warnings': [],\n",
+              "  'ingestion_time': '2025-10-26T09:00:00Z',\n",
+              "  'source': 'kafka',\n",
+              "  'health_status': 'Critical'},\n",
+              " {'pipeline_name': 'audit_logs_ingestion',\n",
+              "  'status_code': 200,\n",
+              "  'duration_seconds': 700,\n",
+              "  'record_count': 90000,\n",
+              "  'max_latency_seconds': 15,\n",
+              "  'errors': [],\n",
+              "  'warnings': ['late data arrival'],\n",
+              "  'ingestion_time': '2025-10-26T02:15:00Z',\n",
+              "  'source': 's3',\n",
+              "  'health_status': 'Warning'}]"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 77
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "eIElwsOxHenX"
+      },
+      "execution_count": 55,
+      "outputs": []
+    }
+  ]
+}
