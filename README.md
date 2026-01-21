@@ -1,5 +1,5 @@
 # Data Pipeline Health Monitoring System
-### This is an assignment given by Ability and Mr. Mayowa Akindele for the python series of our DE journey. It is meant to test my use of condtional statements and logical thinking.
+_This is is meant to test my use of conditional statements and logical thinking_
 
 ## Backgroud to the Challenge
 
